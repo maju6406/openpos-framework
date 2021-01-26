@@ -1,16 +1,14 @@
 package org.jumpmind.pos.core.flow.config;
 
-import java.io.InputStream;
-import java.util.*;
-
 import lombok.extern.slf4j.Slf4j;
 import org.jumpmind.pos.core.flow.FlowException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.core.io.support.ResourcePatternResolver;
+
+import java.io.InputStream;
+import java.util.*;
 
 @Slf4j
 public class YamlConfigProvider implements IFlowConfigProvider {
@@ -47,14 +45,13 @@ public class YamlConfigProvider implements IFlowConfigProvider {
         try {
             ResourcePatternResolver resolver = new PathMatchingResourcePatternResolver(Thread.currentThread().getContextClassLoader());
 
-            Resource[] resources = resolver.getResources("classpath*:/" + path + "/*-flow.yml");
+            List<Resource> resources = new ArrayList<>(Arrays.asList(resolver.getResources("classpath*:/" + path + "/*-flow-ext.yml")));
+            resources.addAll(Arrays.asList(resolver.getResources("classpath*:/" + path + "/*-flow.yml")));
 
             List<YamlFlowConfig> yamlFlowConfigs = new ArrayList<>();
 
-            // Loop these backwards since most specific will be first in the class path an we want those
-            // last so they win the override
-            for (int i = resources.length - 1; i >= 0; --i) {
-                Resource resource = resources[i];
+            for (int i = resources.size() - 1; i >= 0; --i) {
+                Resource resource = resources.get(i);
                 // first pass needs to load all raw YAML.
                 yamlFlowConfigs.addAll(loadYamlResource(appId, path, resource));
             }
@@ -71,7 +68,7 @@ public class YamlConfigProvider implements IFlowConfigProvider {
 
     public void load(String appId, InputStream resource) {
         List<YamlFlowConfig> yamlFlowConfigs = new ArrayList<>();
-        yamlFlowConfigs.addAll(loadYamlResource(appId, resource));
+        yamlFlowConfigs.addAll(loadYamlResource(appId, resource, false));
         // second pass here needs to then convert
         loadYamlFlowConfigs(appId, yamlFlowConfigs);
     }
@@ -125,31 +122,42 @@ public class YamlConfigProvider implements IFlowConfigProvider {
         });
     }
 
-    protected List<YamlFlowConfig> loadYamlResource(String appId, InputStream resource) {
+    protected List<YamlFlowConfig> loadYamlResource(String appId, InputStream resource, boolean isExtension) {
         List<YamlFlowConfig> yamlFlowConfigs = flowConfigLoader.loadYamlFlowConfigs(resource);
-        List<YamlFlowConfig> existingYamlFlowConfigs = loadedYamlFlowConfigs.get(appId);
-
-        if (existingYamlFlowConfigs == null) {
-            existingYamlFlowConfigs = new ArrayList<YamlFlowConfig>();
-            loadedYamlFlowConfigs.put(appId, existingYamlFlowConfigs);
-        }
+        List<YamlFlowConfig> existingYamlFlowConfigs = loadedYamlFlowConfigs.computeIfAbsent(appId, k -> new ArrayList<>());
 
         for (YamlFlowConfig flowConfig : yamlFlowConfigs) {
             YamlFlowConfig match = existingYamlFlowConfigs.stream().filter(flowConfig1 -> flowConfig.getFlowName().equals(flowConfig1.getFlowName())).findFirst().orElse(null);
-            if (match == null) {
-                existingYamlFlowConfigs.add(flowConfig);
+            if (isExtension) {
+                handleExtensionConfig(flowConfig, match);
             } else {
-                match.merge(flowConfig);
+                handleParentConfig(existingYamlFlowConfigs, flowConfig, match);
             }
         }
 
         return existingYamlFlowConfigs;
     }
 
+    private void handleParentConfig(List<YamlFlowConfig> existingYamlFlowConfigs, YamlFlowConfig flowConfig, YamlFlowConfig match) {
+        if (match == null) {
+            existingYamlFlowConfigs.add(flowConfig);
+        } else {
+            throw new FlowException("Tried to load a parent flow, but there is one that already exists: %s", match.getFlowName());
+        }
+    }
+
+    private void handleExtensionConfig(YamlFlowConfig flowConfig, YamlFlowConfig match) {
+        if (match == null) {
+            throw new FlowException("Tried to load an extension flow, but could not find a parent flow to extend: %s", flowConfig.getFlowName());
+        } else {
+            match.merge(flowConfig);
+        }
+    }
+
     protected List<YamlFlowConfig> loadYamlResource(String appId, String path, Resource resource) {
-        log.debug("Loading flow config from {} for {}", resource.toString(), appId);
+        log.info("Loading flow config from {} for {}", resource.toString(), appId);
         try {
-            return loadYamlResource(appId, resource.getInputStream());
+            return loadYamlResource(appId, resource.getInputStream(), resource.getFilename().endsWith("-flow-ext.yml"));
         } catch (Exception ex) {
             throw new FlowException(String.format("Failed while loading resource %s", resource), ex);
         }

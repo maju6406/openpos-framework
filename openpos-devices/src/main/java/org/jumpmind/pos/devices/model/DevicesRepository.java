@@ -11,10 +11,7 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Repository;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Repository
@@ -116,7 +113,16 @@ public class DevicesRepository {
     }
 
     public void updateDeviceStatus(String deviceId, String appId, String status) {
-        devSession.save(new DeviceStatusModel(deviceId, appId, status));
+        DeviceStatusModel statusModel = devSession.findByNaturalId(DeviceStatusModel.class,
+                ModelId.builder().
+                key("deviceId", deviceId).
+                key("appId", appId).build());
+        if (statusModel == null) {
+            statusModel = DeviceStatusModel.builder().deviceId(deviceId).appId(appId).build();
+        }
+        statusModel.setDeviceStatus(status);
+        statusModel.setLastUpdateTime(new Date());
+        devSession.save(statusModel);
     }
 
 }
