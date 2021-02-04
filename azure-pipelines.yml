@@ -17,14 +17,6 @@ trigger:
 pool:
   vmImage: 'ubuntu-18.04'
 
-variables:
-  - group: maven
-  - name: BUILD_NUMBER 
-    value: '$(Build.BuildNumber)'
-  - name: BUILD_NAME 
-    value: '$(Build.DefinitionName)'
-
-
 steps:
 - checkout: self
   persistCredentials: true
